@@ -27,6 +27,8 @@ using namespace SerializedTrace;
 #define MEM_ACCESS dword
 #endif
 
+//#define first1k
+
 TraceConverterBPT::TraceConverterBPT(std::string TraceFileName, std::string BptFileName) {
 	TraceContainerWriter tw(BptFileName, BFD_ARCH, BFD_MACH, default_frames_per_toc_entry, false);
 
@@ -46,6 +48,7 @@ TraceConverterBPT::TraceConverterBPT(std::string TraceFileName, std::string BptF
 		fr.mutable_std_frame()->set_thread_id(insn.eh.tid);
 		fr.mutable_std_frame()->set_rawbytes(insn.eh.rawbytes, insn.eh.inst_size);
 
+		//pre operand
 		fr.mutable_std_frame()->mutable_operand_pre_list();
 		for (int i = 0; (insn.eh.operand[i].type != TNone) && (i < MAX_NUM_OPERANDS); i++) {
 			processOperand(insn.eh.operand[i], fr);
@@ -54,12 +57,10 @@ TraceConverterBPT::TraceConverterBPT(std::string TraceFileName, std::string BptF
 				processOperand(insn.eh.memregs[i][j], fr, true);
 			}
 			//}
-
 		}
 
+		//eflag
 		if (currentEFLAGS != insn.eh.eflags) {
-			currentEFLAGS = insn.eh.eflags;
-
 			//pre
 			operand_info *o = fr.mutable_std_frame()->mutable_operand_pre_list()->add_elem();
 			o->mutable_operand_usage()->set_read(false);
@@ -72,6 +73,8 @@ TraceConverterBPT::TraceConverterBPT(std::string TraceFileName, std::string BptF
 			o->set_value(addrAsHex, 4);
 			o->set_bit_length(32);
 			o->mutable_operand_info_specific()->mutable_reg_operand()->set_name("R_EFLAGS");
+
+			currentEFLAGS = insn.eh.eflags;
 
 			//post
 			o = fr.mutable_std_frame()->mutable_operand_post_list()->add_elem();
@@ -87,12 +90,24 @@ TraceConverterBPT::TraceConverterBPT(std::string TraceFileName, std::string BptF
 			o->mutable_operand_info_specific()->mutable_reg_operand()->set_name("R_EFLAGS");
 		}
 
+		//post operand
+		for (int i = 0; (insn.eh.poperand[i].type != TNone) && (i < MAX_NUM_OPERANDS); i++) {
+			processOperand(insn.eh.poperand[i], fr, false);
+			//if (insn.eh.operand[i].type == TMemLoc) {
+			//for (int j = 0; (j < MAX_NUM_MEMREGS) && (insn.eh.memregs[i][j].type != TNone); j++) {
+			//	processOperand(insn.eh.memregs[i][j], fr, true);
+			//}
+			//}
+		}
+
 		tw.add(fr);
 
 		if (!(counter % 1000000)) {
 			std::cout << "Processed " << counter << std::endl;
 		}
+#ifdef first1k
 		if (counter > 1000) break;
+#endif
 	}
 
 	tw.finish();
@@ -104,26 +119,41 @@ const static char regname_mapBAP[40][9] = { { "R_ES_32" }, { "R_CS_32" }, { "R_S
 //{"eax"}, {"ecx"}, {"edx"}, {"ebx"}, {"esp"}, {"ebp"}, {"esi"}, {"edi"}};
 
 void TraceConverterBPT::processOperand(const OperandVal& op, frame& fr) {
-	processOperand(op, fr, false);
+	processOperand(op, fr, false, true);
 }
 
-void TraceConverterBPT::processOperand(const OperandVal& op, frame& fr, bool isBase) {
+void TraceConverterBPT::processOperand(const OperandVal& op, frame& fr, bool isPre) {
+	processOperand(op, fr, false, isPre);
+}
+
+void TraceConverterBPT::processOperand(const OperandVal& op, frame& fr, bool isBase, bool isPre) {
 
 	if (op.type != TRegister && op.type != TMemLoc && op.type != TMemAddress) return;
 
-	operand_info *o = fr.mutable_std_frame()->mutable_operand_pre_list()->add_elem();
+	operand_info *o;
+	if (isPre)
+		o = fr.mutable_std_frame()->mutable_operand_pre_list()->add_elem();
+	else
+		o = fr.mutable_std_frame()->mutable_operand_post_list()->add_elem();
 
 	o->set_bit_length(op.length * 8);
-	if (isBase) {
+	if (isPre)
+		if (isBase) {
+			o->mutable_operand_usage()->set_read(false);
+			o->mutable_operand_usage()->set_written(false);
+			o->mutable_operand_usage()->set_index(false);
+			o->mutable_operand_usage()->set_base(true);
+		} else {
+			o->mutable_operand_usage()->set_read(XED_IS_READ_OPERAND(op.access) ? 1 : 0);
+			o->mutable_operand_usage()->set_written(XED_IS_WRITE_OPERAND(op.access) ? 1 : 0);
+			o->mutable_operand_usage()->set_index(0);
+			o->mutable_operand_usage()->set_base(0);
+		}
+	else {
 		o->mutable_operand_usage()->set_read(false);
 		o->mutable_operand_usage()->set_written(false);
 		o->mutable_operand_usage()->set_index(false);
-		o->mutable_operand_usage()->set_base(true);
-	} else {
-		o->mutable_operand_usage()->set_read(XED_IS_READ_OPERAND(op.access) ? 1 : 0);
-		o->mutable_operand_usage()->set_written(XED_IS_WRITE_OPERAND(op.access) ? 1 : 0);
-		o->mutable_operand_usage()->set_index(0);
-		o->mutable_operand_usage()->set_base(0);
+		o->mutable_operand_usage()->set_base(false);
 	}
 
 	//o->mutable_operand_usage()->set_index((v.usage & USAGE_MASK) == INDEX);

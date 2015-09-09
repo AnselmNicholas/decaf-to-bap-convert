@@ -144,12 +144,14 @@ struct EntryHeader
 	uint32_t tid;
 	uint16_t inst_size;
 	uint8_t num_operands;
+	uint8_t num_poperands;
 	uint8_t tp;
 	uint32_t eflags;
 	uint32_t cc_op;
 	uint32_t df;
 	char rawbytes[MAX_INSN_BYTES];
 	OperandVal operand[MAX_NUM_OPERANDS];
+	OperandVal poperand[MAX_NUM_OPERANDS];
 	OperandVal memregs[MAX_NUM_OPERANDS][MAX_NUM_MEMREGS];
 };
 
